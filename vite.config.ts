@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        allowedHosts: [
+          'drive-summarizer.ai-smirnov.ru'
+        ]
       },
       plugins: [
         react(),
