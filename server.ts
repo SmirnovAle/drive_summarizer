@@ -14,19 +14,23 @@ import { createServer as createViteServer } from 'vite';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Настройка прокси для Gemini API
+// Настройка прокси
 const proxy = process.env.GEMINI_PROXY;
+const agent = proxy ? new SocksProxyAgent(proxy) : undefined;
+
+// Вспомогательная функция для запросов с поддержкой прокси
+const proxyFetch = (url: string, options: any = {}) => {
+  return fetch(url, {
+    ...options,
+    agent: agent
+  }) as any;
+};
+
+// Патч глобального fetch для библиотек, которые его используют
 if (proxy) {
-  console.log(`Using proxy for Gemini API: ${proxy}`);
-  const agent = new SocksProxyAgent(proxy);
-  const originalFetch = global.fetch;
+  console.log(`[Proxy] Using SOCKS5 proxy: ${proxy}`);
   // @ts-ignore
-  global.fetch = (url: any, options: any) => {
-    return fetch(url, {
-      ...options,
-      agent: agent
-    }) as any;
-  };
+  global.fetch = proxyFetch;
 }
 
 async function startServer() {
@@ -63,7 +67,7 @@ async function startServer() {
       });
       
       const listUrl = `https://www.googleapis.com/drive/v3/files?${searchParams.toString()}`;
-      const listResponse = await fetch(listUrl);
+      const listResponse = await proxyFetch(listUrl);
       
       if (!listResponse.ok) {
         const errorText = await listResponse.text();
@@ -110,7 +114,7 @@ async function startServer() {
 
         try {
           const contentUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${apiKey}`;
-          const contentResponse = await fetch(contentUrl);
+          const contentResponse = await proxyFetch(contentUrl);
           
           if (!contentResponse.ok) {
             console.warn(`[Drive] Could not download ${file.name}: ${contentResponse.statusText}`);
@@ -148,11 +152,14 @@ async function startServer() {
   app.post('/api/summarize', async (req, res) => {
     try {
       const { files, folderUrl } = req.body;
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
 
       if (!apiKey) {
-        return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on server' });
+        console.error('[Gemini] Missing API Key');
+        return res.status(500).json({ error: 'GEMINI_API_KEY не настроен на сервере' });
       }
+
+      console.log(`[Gemini] Starting analysis for ${files?.length} files...`);
 
       const ai = new GoogleGenAI({ apiKey });
       
@@ -176,26 +183,30 @@ async function startServer() {
         "sentiment": "neutral | positive | negative"
       }`;
 
-      const result = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
-              ...fileParts
-            ]
-          }
-        ]
+      // Используем только проверенные модели: gemini-3-flash-preview
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          parts: [
+            { text: prompt },
+            ...fileParts
+          ]
+        }
       });
 
-      const responseText = result.text || '{}';
+      const responseText = response.text || '{}';
       
+      console.log('[Gemini] Analysis complete');
+
       // Очистка от markdown-оберток, если они есть
       const cleanJson = responseText.replace(/```json|```/g, '').trim();
       res.json(JSON.parse(cleanJson));
     } catch (error: any) {
-      console.error('Server error:', error);
+      console.error('[Gemini] API Error:', error);
+      // Если ошибка содержит JSON (как в вашем случае), прокидываем её понятнее
+      if (error.message && error.message.includes('API key not valid')) {
+        return res.status(401).json({ error: 'Ключ Gemini API недействителен. Проверьте GEMINI_API_KEY в настройках.' });
+      }
       res.status(500).json({ error: error.message });
     }
   });
