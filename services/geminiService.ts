@@ -3,8 +3,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { SummaryResult, FileData } from '../types';
 
 export const summarizeDocuments = async (files: FileData[], folderUrl: string): Promise<SummaryResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-  const model = "gemini-3-pro-preview";
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY || '' });
+  const model = "gemini-3-flash-preview";
   
   // Ограничиваем количество файлов для стабильности контекста (например, первые 15)
   const processedFiles = files.slice(0, 15);
@@ -33,7 +33,7 @@ export const summarizeDocuments = async (files: FileData[], folderUrl: string): 
 
   const response = await ai.models.generateContent({
     model: model,
-    contents: [{ parts: [textPart, ...fileParts] }],
+    contents: { parts: [textPart, ...fileParts] },
     config: {
       temperature: 0.2, // Снижаем температуру для более точного анализа фактов
       responseMimeType: "application/json",
