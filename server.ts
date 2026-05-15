@@ -29,9 +29,8 @@ async function startServer() {
         return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on server' });
       }
 
-      const ai = new GoogleGenAI(apiKey);
-      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-
+      const ai = new GoogleGenAI({ apiKey });
+      
       const fileParts = files.map((f: any) => ({
         inlineData: {
           data: f.data,
@@ -46,15 +45,26 @@ async function startServer() {
       
       ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON:
       {
-        "title": "Заголовок отчета",
-        "description": "Общее описание содержимого папки",
+        "summary": "Глубокое резюме всей папки.",
         "keyPoints": ["Важный пункт 1", "Важный пункт 2"],
-        "sentiment": "neutral | positive | negative",
-        "wordCount": 100
+        "mainTopics": ["Ключевая тема 1", "Ключевая тема 2"],
+        "sentiment": "neutral | positive | negative"
       }`;
 
-      const result = await model.generateContent([prompt, ...fileParts]);
-      const responseText = result.response.text();
+      const result = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: prompt },
+              ...fileParts
+            ]
+          }
+        ]
+      });
+
+      const responseText = result.text || '{}';
       
       // Очистка от markdown-оберток, если они есть
       const cleanJson = responseText.replace(/```json|```/g, '').trim();
