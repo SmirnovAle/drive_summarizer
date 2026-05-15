@@ -148,22 +148,41 @@ async function startServer() {
     }
   });
 
-  // API Endpoint для суммаризации
+  // API Endpoint для суммаризации (Gemini)
   app.post('/api/summarize', async (req, res) => {
     try {
       const { files, folderUrl } = req.body;
-      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY;
+      const driveKey = process.env.GOOGLE_DRIVE_API_KEY;
+
+      // Логирование состояния ключей (без вывода полных значений)
+      console.log('--- [Auth Debug] ---');
+      console.log(`[Gemini] Key present: ${!!apiKey}`);
+      if (apiKey) {
+        console.log(`[Gemini] Key length: ${apiKey.length}`);
+        console.log(`[Gemini] Key prefix: ${apiKey.substring(0, 6)}...`);
+      }
+      console.log(`[Drive]  Key present: ${!!driveKey}`);
+      if (driveKey) {
+        console.log(`[Drive]  Key length: ${driveKey.length}`);
+        console.log(`[Drive]  Key prefix: ${driveKey.substring(0, 6)}...`);
+      }
+      console.log(`[Proxy]  Using proxy: ${!!proxy}`);
+      console.log('--------------------');
 
       if (!apiKey) {
-        console.error('[Gemini] Missing API Key');
+        console.error('[Gemini] GEMINI_API_KEY is not configured');
         return res.status(500).json({ error: 'GEMINI_API_KEY не настроен на сервере' });
       }
 
       console.log(`[Gemini] Starting analysis for ${files?.length} files...`);
 
+      // Инициализация SDK. 
+      // Примечание: @google/genai использует глобальный fetch, 
+      // который мы пропатчили для использования SOCKS5 прокси.
       const ai = new GoogleGenAI({ apiKey });
       
-      const fileParts = files.map((f: any) => ({
+      const fileParts = (files || []).map((f: any) => ({
         inlineData: {
           data: f.data,
           mimeType: f.mimeType
@@ -183,9 +202,13 @@ async function startServer() {
         "sentiment": "neutral | positive | negative"
       }`;
 
-      // Используем только проверенные модели: gemini-3-flash-preview
+      // Модель gemini-3-flash-preview (или gemini-1.5-flash как запасной вариант для стандартных ключей)
+      // В AI Studio Build мы используем gemini-3-flash-preview.
+      const modelName = "gemini-3-flash-preview";
+      console.log(`[Gemini] Calling model: ${modelName}`);
+
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: modelName,
         contents: {
           parts: [
             { text: prompt },
@@ -195,19 +218,29 @@ async function startServer() {
       });
 
       const responseText = response.text || '{}';
-      
       console.log('[Gemini] Analysis complete');
 
-      // Очистка от markdown-оберток, если они есть
+      // Очистка от markdown-оберток
       const cleanJson = responseText.replace(/```json|```/g, '').trim();
       res.json(JSON.parse(cleanJson));
+
     } catch (error: any) {
       console.error('[Gemini] API Error:', error);
-      // Если ошибка содержит JSON (как в вашем случае), прокидываем её понятнее
-      if (error.message && error.message.includes('API key not valid')) {
-        return res.status(401).json({ error: 'Ключ Gemini API недействителен. Проверьте GEMINI_API_KEY в настройках.' });
+      
+      // Перехват типичных ошибок ключа
+      if (error.message?.includes('API key not valid')) {
+        return res.status(401).json({ 
+          error: 'Ключ Gemini API недействителен (API_KEY_INVALID). Проверьте GEMINI_API_KEY.' 
+        });
       }
-      res.status(500).json({ error: error.message });
+
+      if (error.message?.includes('User location is not supported')) {
+        return res.status(403).json({ 
+          error: 'Регион не поддерживается. Убедитесь, что GEMINI_PROXY настроен верно.' 
+        });
+      }
+
+      res.status(500).json({ error: error.message || 'Внутренняя ошибка при анализе ИИ' });
     }
   });
 
