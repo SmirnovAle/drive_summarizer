@@ -36,6 +36,114 @@ async function startServer() {
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
 
+  // API Endpoint для получения файлов из Google Drive
+  app.post('/api/drive/files', async (req, res) => {
+    try {
+      const { folderId } = req.body;
+      const apiKey = process.env.GOOGLE_DRIVE_API_KEY;
+
+      if (!apiKey) {
+        console.error('[Drive] GOOGLE_DRIVE_API_KEY is missing in environment');
+        return res.status(500).json({ error: 'GOOGLE_DRIVE_API_KEY не настроен на сервере' });
+      }
+
+      if (!folderId) {
+        console.error('[Drive] folderId is missing in request body');
+        return res.status(400).json({ error: 'ID папки не указан' });
+      }
+
+      console.log(`[Drive] Fetching files for folder: ${folderId}`);
+
+      // 1. Получаем список файлов
+      const query = `'${folderId}' in parents and trashed=false`;
+      const searchParams = new URLSearchParams({
+        q: query,
+        fields: 'files(id,name,mimeType)',
+        key: apiKey
+      });
+      
+      const listUrl = `https://www.googleapis.com/drive/v3/files?${searchParams.toString()}`;
+      const listResponse = await fetch(listUrl);
+      
+      if (!listResponse.ok) {
+        const errorText = await listResponse.text();
+        console.error('[Drive] List Error:', listResponse.status, errorText);
+        
+        if (listResponse.status === 404) {
+          return res.status(404).json({ error: 'Папка не найдена или неверный ID' });
+        }
+        if (listResponse.status === 403) {
+          return res.status(403).json({ error: 'Доступ запрещен. Убедитесь, что папка «Доступна всем, у кого есть ссылка»' });
+        }
+        if (listResponse.status === 429) {
+          return res.status(429).json({ error: 'Превышена квота Google Drive API' });
+        }
+        
+        return res.status(listResponse.status).json({ error: `Ошибка Drive API: ${listResponse.statusText || 'Unknown Error'}` });
+      }
+      
+      const listData: any = await listResponse.json();
+      if (!listData.files || listData.files.length === 0) {
+        console.log(`[Drive] Folder ${folderId} is empty`);
+        return res.json([]);
+      }
+
+      console.log(`[Drive] Found ${listData.files.length} files. Filtering and downloading...`);
+
+      const files: any[] = [];
+      const supportedMimeTypes = [
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'text/plain',
+        'text/markdown',
+        'application/json'
+      ];
+
+      // 2. Скачиваем контент
+      for (const file of listData.files) {
+        if (!supportedMimeTypes.includes(file.mimeType)) {
+          console.log(`[Drive] Skipping unsupported file: ${file.name} (${file.mimeType})`);
+          continue;
+        }
+
+        try {
+          const contentUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${apiKey}`;
+          const contentResponse = await fetch(contentUrl);
+          
+          if (!contentResponse.ok) {
+            console.warn(`[Drive] Could not download ${file.name}: ${contentResponse.statusText}`);
+            continue;
+          }
+
+          const buffer = await contentResponse.arrayBuffer();
+          const base64 = Buffer.from(buffer).toString('base64');
+
+          files.push({
+            id: file.id,
+            name: file.name,
+            data: base64,
+            mimeType: file.mimeType,
+            size: buffer.byteLength
+          });
+          console.log(`[Drive] Downloaded: ${file.name} (${buffer.byteLength} bytes)`);
+        } catch (e) {
+          console.error(`[Drive] Error downloading ${file.name}:`, e);
+        }
+      }
+
+      if (files.length === 0 && listData.files.length > 0) {
+        return res.status(400).json({ error: 'В папке нет поддерживаемых типов файлов (PDF, PNG, JPG, TXT)' });
+      }
+
+      res.json(files);
+    } catch (error: any) {
+      console.error('[Drive] Unexpected Server Error:', error);
+      res.status(500).json({ error: 'Внутренняя ошибка сервера при работе с Google Drive' });
+    }
+  });
+
   // API Endpoint для суммаризации
   app.post('/api/summarize', async (req, res) => {
     try {
