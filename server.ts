@@ -5,12 +5,29 @@ dotenv.config();
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
+import fetch from 'node-fetch';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Настройка прокси для Gemini API
+const proxy = process.env.GEMINI_PROXY;
+if (proxy) {
+  console.log(`Using proxy for Gemini API: ${proxy}`);
+  const agent = new SocksProxyAgent(proxy);
+  const originalFetch = global.fetch;
+  // @ts-ignore
+  global.fetch = (url: any, options: any) => {
+    return fetch(url, {
+      ...options,
+      agent: agent
+    }) as any;
+  };
+}
 
 async function startServer() {
   const app = express();
