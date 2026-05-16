@@ -10,6 +10,11 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdf = require('pdf-parse');
+import mammoth from 'mammoth';
+import * as xlsx from 'xlsx';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +36,51 @@ if (proxy) {
   console.log(`[Proxy] Using SOCKS5 proxy: ${proxy}`);
   // @ts-ignore
   global.fetch = proxyFetch;
+}
+
+// Вспомогательная функция для извлечения текста из различных форматов
+async function extractText(mimeType: string, buffer: Buffer, fileName: string): Promise<string> {
+  try {
+    if (mimeType.includes('text/') || mimeType.includes('json') || mimeType.includes('xml')) {
+      return buffer.toString('utf-8');
+    }
+
+    if (mimeType === 'application/pdf') {
+      const data = await pdf(buffer);
+      return data.text;
+    }
+
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      const result = await mammoth.extractRawText({ buffer });
+      return result.value;
+    }
+
+    if (
+      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      mimeType === 'application/vnd.ms-excel' ||
+      mimeType === 'application/vnd.oasis.opendocument.spreadsheet' ||
+      mimeType === 'text/csv'
+    ) {
+      const workbook = xlsx.read(buffer, { type: 'buffer' });
+      let text = '';
+      workbook.SheetNames.forEach(sheetName => {
+        text += `Sheet: ${sheetName}\n`;
+        text += xlsx.utils.sheet_to_txt(workbook.Sheets[sheetName]) + '\n';
+      });
+      return text;
+    }
+
+    // Для изображений возвращаем пустую строку, так как они пойдут как inlineData
+    if (mimeType.startsWith('image/')) {
+      return '';
+    }
+
+    console.log(`[Extract] No specialized extractor for ${mimeType}, reading as plain text`);
+    return buffer.toString('utf-8').slice(0, 50000); // Ограничение на всякий случай
+  } catch (err) {
+    console.error(`[Extract] Error extracting from ${fileName}:`, err);
+    return `[Ошибка извлечения текста из ${fileName}]`;
+  }
 }
 
 async function startServer() {
@@ -96,18 +146,46 @@ async function startServer() {
 
       const files: any[] = [];
       const supportedMimeTypes = [
+        // Документы
         'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
+        'application/vnd.ms-excel', // xls
+        'application/vnd.oasis.opendocument.spreadsheet', // ods
+        'text/csv',
+        'application/rtf',
+        'text/rtf',
+        
+        // Изображения (Gemini их любит)
         'image/jpeg',
         'image/png',
         'image/webp',
+        'image/heic',
+        'image/heif',
+
+        // Текстовые
         'text/plain',
         'text/markdown',
-        'application/json'
+        'text/html',
+        'application/json',
+        'application/xml',
+        'text/xml',
+        'application/x-yaml',
+        'text/yaml',
+        'text/x-log'
       ];
+
+      const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB limit per file
 
       // 2. Скачиваем контент
       for (const file of listData.files) {
-        if (!supportedMimeTypes.includes(file.mimeType)) {
+        const isSupported = supportedMimeTypes.some(type => file.mimeType.includes(type)) || 
+                           file.name.endsWith('.md') || 
+                           file.name.endsWith('.log') || 
+                           file.name.endsWith('.yml') || 
+                           file.name.endsWith('.yaml');
+
+        if (!isSupported) {
           console.log(`[Drive] Skipping unsupported file: ${file.name} (${file.mimeType})`);
           continue;
         }
@@ -121,24 +199,45 @@ async function startServer() {
             continue;
           }
 
-          const buffer = await contentResponse.arrayBuffer();
-          const base64 = Buffer.from(buffer).toString('base64');
+          const buffer = Buffer.from(await contentResponse.arrayBuffer());
+          
+          if (buffer.length > MAX_FILE_SIZE) {
+            console.warn(`[Drive] File ${file.name} is too large (${buffer.length} bytes), skipping.`);
+            continue;
+          }
+
+          // Если это изображение - шлем как base64
+          // Если документ - извлекаем текст и шлем текст
+          let dataToSend = '';
+          let finalMimeType = file.mimeType;
+
+          if (file.mimeType.startsWith('image/')) {
+            dataToSend = buffer.toString('base64');
+          } else {
+            dataToSend = Buffer.from(await extractText(file.mimeType, buffer, file.name)).toString('base64');
+            finalMimeType = 'text/plain'; // Отправляем извлеченный текст как plain text
+          }
+
+          if (!dataToSend || dataToSend.length < 5) {
+             console.warn(`[Drive] extracted data for ${file.name} is empty, skipping`);
+             continue;
+          }
 
           files.push({
             id: file.id,
             name: file.name,
-            data: base64,
-            mimeType: file.mimeType,
+            data: dataToSend,
+            mimeType: finalMimeType,
             size: buffer.byteLength
           });
-          console.log(`[Drive] Downloaded: ${file.name} (${buffer.byteLength} bytes)`);
+          console.log(`[Drive] Processed: ${file.name} (${buffer.byteLength} bytes)`);
         } catch (e) {
           console.error(`[Drive] Error downloading ${file.name}:`, e);
         }
       }
 
       if (files.length === 0 && listData.files.length > 0) {
-        return res.status(400).json({ error: 'В папке нет поддерживаемых типов файлов (PDF, PNG, JPG, TXT)' });
+        return res.status(400).json({ error: 'В папке нет поддерживаемых типов файлов или они слишком большие/пустые' });
       }
 
       res.json(files);

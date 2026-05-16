@@ -5,7 +5,7 @@ import { extractFolderId, fetchFolderFiles } from './services/driveService';
 import { SummaryResult, FileData, AppStatus } from './types';
 
 const App: React.FC = () => {
-  const [folderUrl, setFolderUrl] = useState('https://drive.google.com/drive/folders/1x6EKNkVw6PlFVTr6cGrsVscmRuwqGrXd?usp=sharing');
+  const [folderUrl, setFolderUrl] = useState('');
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [loadingStep, setLoadingStep] = useState<string>('');
@@ -119,7 +119,7 @@ const App: React.FC = () => {
                 value={folderUrl}
                 onChange={(e) => setFolderUrl(e.target.value)}
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500/50 outline-none transition-all text-white"
-                placeholder="https://drive.google.com/..."
+                placeholder="https://drive.google.com/drive/folders/your-folder-id"
               />
             </div>
 
@@ -152,6 +152,16 @@ const App: React.FC = () => {
                 <div className="w-full py-4 rounded-xl border border-dashed border-white/10 bg-white/5 hover:bg-white/10 text-slate-400 text-xs font-bold transition-all flex items-center justify-center gap-2">
                   <i className="fas fa-file-upload"></i>
                   Загрузить файлы вручную
+                </div>
+              </div>
+
+              <div className="mt-4 p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 flex flex-col gap-2">
+                <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Поддерживаемые форматы:</p>
+                <div className="flex flex-wrap gap-2">
+                  {['PDF', 'DOCX', 'XLSX', 'CSV', 'TXT', 'MD', 'JPG', 'PNG', 'JSON', 'HEIC'].map(fmt => (
+                    <span key={fmt} className="text-[8px] font-bold px-1.5 py-0.5 bg-white/5 rounded border border-white/5 text-slate-500 uppercase">{fmt}</span>
+                  ))}
+                  <span className="text-[8px] font-bold px-1.5 py-0.5 text-slate-600 italic">...и др.</span>
                 </div>
               </div>
 
