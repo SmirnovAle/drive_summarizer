@@ -49,17 +49,19 @@ const safeEqual = (actual: string, expected: string) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
-const authenticateApi: express.RequestHandler = (req, res, next) => {
+const authenticateRequest: express.RequestHandler = (req, res, next) => {
   const username = process.env.APP_AUTH_USERNAME || '';
   const password = process.env.APP_AUTH_PASSWORD || '';
   if (!username || !password) {
-    return res.status(503).json({ error: 'API authentication is not configured' });
+    return res.status(503).send('Application authentication is not configured');
   }
+
   const header = req.headers.authorization || '';
   if (!header.startsWith('Basic ')) {
     res.setHeader('WWW-Authenticate', 'Basic realm="DriveSummary Pro"');
-    return res.status(401).json({ error: 'Authentication required' });
+    return res.status(401).send('Authentication required');
   }
+
   try {
     const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
     const separator = decoded.indexOf(':');
@@ -70,7 +72,7 @@ const authenticateApi: express.RequestHandler = (req, res, next) => {
     next();
   } catch {
     res.setHeader('WWW-Authenticate', 'Basic realm="DriveSummary Pro"');
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).send('Invalid credentials');
   }
 };
 
@@ -124,6 +126,8 @@ async function startServer() {
     throw new Error('APP_AUTH_USERNAME and APP_AUTH_PASSWORD are required in production');
   }
 
+  if (isProduction) app.set('trust proxy', 1);
+
   const allowedOrigins = new Set([
     'https://drive-summarizer.ai-smirnov.ru',
     'http://localhost:3000', 'http://127.0.0.1:3000',
@@ -135,8 +139,14 @@ async function startServer() {
       return callback(new Error('Origin not allowed by CORS'));
     }
   }));
+
+  // In production protect the whole application so the browser performs the
+  // Basic Auth challenge on the initial page load and reuses credentials for
+  // same-origin /api/* fetches. In development only protect API routes.
+  if (isProduction) app.use(authenticateRequest);
+  else app.use('/api', authenticateRequest);
+
   app.use(express.json({ limit: `${MAX_JSON_BODY_MB}mb` }));
-  app.use('/api', authenticateApi);
 
   app.post('/api/drive/files', async (req, res) => {
     try {
