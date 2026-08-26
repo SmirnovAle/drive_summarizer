@@ -119,7 +119,7 @@ async function extractText(mimeType: string, buffer: Buffer, fileName: string): 
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = intEnv('PORT', 3000);
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (isProduction && (!process.env.APP_AUTH_USERNAME || !process.env.APP_AUTH_PASSWORD)) {
