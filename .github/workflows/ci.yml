@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - name: Verify frontend bundle has no backend secrets
+        shell: bash
+        run: |
+          if grep -R -n -E 'GEMINI_API_KEY|GOOGLE_DRIVE_API_KEY|AIza[0-9A-Za-z_-]{20,}' dist/assets dist/index.html; then
+            echo 'Potential secret exposure found in frontend bundle'
+            exit 1
+          fi

@@ -1,52 +1,62 @@
-
 # 🧠 DriveSummary Pro
 
-**DriveSummary Pro** — это интеллектуальное веб-приложение для автоматического анализа и суммаризации содержимого папок Google Drive. Используя новейшую мультимодальную модель **Gemini 3 Pro**, приложение способно "читать" не только текст, но и изображения (OCR) и PDF-документы, объединяя их в единый смысловой отчет.
+**DriveSummary Pro** — веб-приложение для анализа и суммаризации содержимого публичных папок Google Drive с помощью Gemini.
 
 ## 🚀 Основные возможности
 
-- **Облачное сканирование**: Прямая интеграция с Google Drive API v3 для получения файлов из публичных папок.
-- **Мультимодальный ИИ**: Анализ текстовых файлов, изображений (JPG, PNG, WEBP) и PDF-документов.
-- **Встроенный OCR**: ИИ автоматически распознает рукописный и печатный текст на картинках.
-- **Структурированные отчеты**: Результат включает общее резюме, ключевые тезисы, список тем и эмоциональный окрас документов.
-- **Modern UI**: Футуристичный интерфейс с поддержкой темной темы, анимациями и адаптивным дизайном.
+- Получение поддерживаемых файлов через Google Drive API v3.
+- Анализ текста, PDF, офисных документов и изображений.
+- Структурированный итог: summary, key points, topics и sentiment.
+- React 19 + TypeScript frontend; Express backend; Gemini через `@google/genai`.
 
-## 🛠 Технологический стек
+## 🔐 Security model
 
-- **Frontend**: React 19, TypeScript
-- **Styling**: Tailwind CSS
-- **AI Engine**: Google Gemini API (@google/genai)
-- **Cloud Integration**: Google Drive API v3
-- **Icons**: FontAwesome 6
+Все Google credentials являются **backend-only secrets**. Frontend обращается только к same-origin `/api/*` endpoints.
 
-## 📦 Установка и запуск
+Никогда не передавайте `GEMINI_API_KEY`, `GOOGLE_DRIVE_API_KEY` или другие секреты через Vite `define`, `import.meta.env`, frontend source code или browser bundle. `.env` и `.env.local` должны оставаться в `.gitignore`; в Git разрешён только placeholder-only `.env.example`.
 
-1. Склонируйте репозиторий:
-   ```bash
-   git clone https://github.com/your-username/drive-summary-pro.git
-   ```
-2. Перейдите в папку проекта:
-   ```bash
-   cd drive-summary-pro
-   ```
-3. Убедитесь, что у вас настроен API ключ Gemini в переменной окружения `API_KEY`.
+Все `/api/*` endpoints защищены HTTP Basic Authentication. В production сервер не запускается без `APP_AUTH_USERNAME` и `APP_AUTH_PASSWORD`. `/api/summarize` дополнительно имеет per-IP rate limiting и ограничения размера payload/files.
 
-## 📖 Как пользоваться
+## 📦 Настройка
 
-1. **Автоматический режим**:
-   - Вставьте ссылку на публичную папку Google Drive.
-   - Нажмите **«Сканировать облако»**. Приложение само загрузит файлы и запустит инференс.
-2. **Ручной режим**:
-   - Если файлы защищены CORS, скачайте их и перетащите в зону **«Загрузить файлы вручную»**.
-   - Нажмите появившуюся кнопку **«Запустить анализ»**.
+Скопируйте `.env.example` в `.env` на сервере и задайте реальные значения только в server environment. Для production обязательно задайте сильные уникальные `APP_AUTH_USERNAME` и `APP_AUTH_PASSWORD`.
 
-## 🏗 Модульная архитектура
+Основные переменные:
 
-Проект спроектирован так, чтобы его было легко расширять:
-- `services/driveService.ts`: Логика взаимодействия с облачными хранилищами.
-- `services/geminiService.ts`: Конфигурация ИИ, промптов и схем ответов.
-- `types.ts`: Строгая типизация всех данных приложения.
+- `GEMINI_API_KEY` — backend-only Gemini key.
+- `GOOGLE_DRIVE_API_KEY` — backend-only Drive key.
+- `APP_AUTH_USERNAME`, `APP_AUTH_PASSWORD` — доступ к `/api/*`.
+- `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX_REQUESTS` — лимит `/api/summarize`.
+- `MAX_JSON_BODY_MB`, `MAX_FILES`, `MAX_FILE_ENCODED_MB`, `MAX_TOTAL_ENCODED_MB` — payload limits.
+- `GEMINI_PROXY` — optional SOCKS5 proxy.
+- `PORT` — application port.
+
+## 🚨 Key rotation / incident deployment
+
+После подозрения на компрометацию ключа:
+
+1. Revoke/delete старый Gemini key.
+2. Создайте новый key с минимально необходимыми API restrictions.
+3. Установите новый `GEMINI_API_KEY` только в backend/server environment.
+4. Настройте `APP_AUTH_USERNAME` и сильный `APP_AUTH_PASSWORD`.
+5. Соберите и задеплойте приложение, затем перезапустите backend.
+6. Проверьте browser JS/assets: Gemini/Google API keys и имена backend secrets не должны присутствовать в bundle.
+7. Проверьте, что запрос к `/api/*` без credentials получает `401`, корректно аутентифицированный запрос работает, а rate limit возвращает `429` при превышении.
+8. Проверьте Google Cloud API metrics/billing после ротации.
+
+Не записывайте реальные ключи в README, `.env.example`, логи, issues или PR.
+
+## 📖 Использование
+
+После прохождения HTTP Basic Authentication вставьте ссылку на публичную папку Google Drive и запустите сканирование/анализ. Поддерживается также существующий ручной workflow загрузки файлов.
+
+## 🏗 Основные модули
+
+- `services/driveService.ts` — frontend workflow Google Drive.
+- `services/geminiService.ts` — same-origin обращение к backend summarization API.
+- `server.ts` — Drive access, extraction, Gemini inference и security controls.
+- `types.ts` — типы приложения.
 
 ## 📄 Лицензия
 
-MIT. Свободно для использования и модификации.
+MIT.
